@@ -11,48 +11,70 @@ MODELS = {
     "glucose": BASE_DIR / "model2.h5",    # 8 features
     "full": BASE_DIR / "model3.h5"        # 9 features
 }
-SCALER_PATH = BASE_DIR / "minmax_scaler.joblib"
-
-# --- Feature Engineering ---
-def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare features with proper encoding for all types"""
-    # Convert categorical features to numerical
-    gender_male = 1 if gender == "Male" else 0
-    smoking_encoded = {"Never": 0, "Former": 1, "Current": 2}[smoking]
-    hypertension_encoded = 1 if hypertension == "Yes" else 0
-    heart_disease_encoded = 1 if heart_disease == "Yes" else 0
-    
-    # Base features (Model 1)
-    features = [
-        gender_male,
-        float(age),
-        float(bmi),
-        smoking_encoded,
-        hypertension_encoded,
-        heart_disease_encoded
-    ]
-    
-    # Add glucose if provided (Model 2)
-    if glucose > 0:
-        features.append(float(glucose))
-        
-    # Add HbA1c if provided (Model 3)
-    if hba1c > 0:
-        features.append(float(hba1c))
-        
-    return np.array([features])
+SCALERS = {
+    "basic": BASE_DIR / "scaler_basic.joblib",    # 7 features
+    "glucose": BASE_DIR / "scaler_glucose.joblib", # 8 features
+    "full": BASE_DIR / "scaler_full.joblib"       # 9 features
+}
 
 # --- Model Loading ---
 @st.cache_resource
 def load_resources():
-    """Load models and scaler with validation"""
+    """Load models and scalers with validation"""
     try:
-        scaler = joblib.load(SCALER_PATH)
-        models = {name: load_model(path) for name, path in MODELS.items()}
-        return scaler, models
+        models = {}
+        scalers = {}
+        
+        # Load all models and their corresponding scalers
+        for name in MODELS:
+            models[name] = load_model(MODELS[name])
+            scalers[name] = joblib.load(SCALERS[name])
+            
+            # Verify feature counts match
+            expected_features = {
+                "basic": 7,
+                "glucose": 8,
+                "full": 9
+            }[name]
+            
+            if scalers[name].n_features_in_ != expected_features:
+                raise ValueError(
+                    f"Model {name} expects {expected_features} features, "
+                    f"but scaler has {scalers[name].n_features_in_}"
+                )
+                
+        return scalers, models
+        
     except Exception as e:
         st.error(f"❌ Failed to load resources: {str(e)}")
         st.stop()
+
+# --- Feature Engineering ---
+def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
+    """Create feature array with consistent order"""
+    # Convert categorical features
+    gender_encoded = [1, 0] if gender == "Male" else [0, 1]
+    smoking_encoded = {"Never": 0, "Former": 1, "Current": 2}[smoking]
+    
+    # Base features for basic model
+    features = [
+        *gender_encoded,
+        float(age),
+        float(bmi),
+        smoking_encoded,
+        int(hypertension == "Yes"),
+        int(heart_disease == "Yes")
+    ]
+    
+    # Add glucose for intermediate model
+    if glucose > 0:
+        features.append(float(glucose))
+        
+    # Add HbA1c for full model
+    if hba1c > 0:
+        features.append(float(hba1c))
+        
+    return np.array([features])
 
 # --- Streamlit UI ---
 def main():
@@ -60,7 +82,7 @@ def main():
     st.title("🩺 Diabetes Risk Prediction")
     
     # Load resources
-    scaler, models = load_resources()
+    scalers, models = load_resources()
     
     # --- Input Form ---
     with st.form("prediction_form"):
@@ -90,7 +112,7 @@ def main():
     # --- Prediction ---
     if submitted:
         try:
-            # Determine model to use
+            # Determine which model to use
             model_key = "basic"
             if hba1c > 0 and glucose > 0:
                 model_key = "full"
@@ -104,11 +126,15 @@ def main():
                 glucose, hba1c
             )
             
+            # Get the correct scaler and model
+            scaler = scalers[model_key]
+            model = models[model_key]
+            
             # Validate feature count
             expected_features = {
-                "basic": 6,   # gender, age, bmi, smoking, hypertension, heart_disease
-                "glucose": 7, # + glucose
-                "full": 8     # + hba1c
+                "basic": 7,
+                "glucose": 8,
+                "full": 9
             }[model_key]
             
             if input_array.shape[1] != expected_features:
@@ -118,7 +144,7 @@ def main():
             
             # Scale and predict
             scaled_input = scaler.transform(input_array)
-            prediction = models[model_key].predict(scaled_input)[0][0] * 100
+            prediction = model.predict(scaled_input)[0][0] * 100
             
             # Display results
             st.success("### Prediction Results")
@@ -127,6 +153,7 @@ def main():
             cols[1].metric("Features Used", expected_features)
             cols[2].metric("Diabetes Risk", f"{prediction:.1f}%")
             
+            # Interpretation guide
             st.info("""
             **Risk Interpretation:**
             - < 5%: Low risk
@@ -135,11 +162,12 @@ def main():
             """)
             
         except Exception as e:
-            st.error(f"⚠️ Error: {str(e)}")
+            st.error(f"⚠️ Prediction failed: {str(e)}")
             st.write("Debug Info:")
             st.json({
                 "input_features": input_array.tolist()[0],
                 "expected_features": expected_features,
+                "actual_features": input_array.shape[1],
                 "model_used": model_key
             })
 
