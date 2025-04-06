@@ -4,11 +4,13 @@ import joblib
 from tensorflow.keras.models import load_model
 
 # Load scaler and models
-scaler = joblib.load("minmax_scaler.joblib")
+import os
 
-model1 = load_model("model1.h5")  # without glucose & hba1c
-model2 = load_model("model2.h5")  # with glucose
-model3 = load_model("model3.h5")  # with glucose + hba1c
+# Update file paths like this:
+scaler = joblib.load(os.path.join(os.path.dirname(__file__), "minmax_scaler.joblib"))
+model1 = load_model(os.path.join(os.path.dirname(__file__), "model1.h5"))
+model2 = load_model(os.path.join(os.path.dirname(__file__), "model2.h5")) # with glucose
+model3 = load_model(os.path.join(os.path.dirname(__file__), "model3.h5"))  # with glucose + hba1c
 
 # Helper functions
 def map_smoking(smoking):
