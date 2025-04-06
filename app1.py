@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import joblib  # This was missing
 from tensorflow.keras.models import load_model
 from pathlib import Path
 
@@ -14,7 +15,8 @@ MODEL_CONFIG = {
             "gender", "age", "bmi", 
             "smoking", "hypertension", 
             "heart_disease", "padding"
-        ]
+        ],
+        "description": "Basic health factors only"
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
@@ -25,7 +27,8 @@ MODEL_CONFIG = {
             "smoking", "hypertension",
             "heart_disease", "glucose",
             "padding"
-        ]
+        ],
+        "description": "Includes blood glucose"
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
@@ -36,14 +39,15 @@ MODEL_CONFIG = {
             "smoking", "hypertension",
             "heart_disease", "glucose",
             "hba1c", "padding"
-        ]
+        ],
+        "description": "Includes glucose + HbA1c"
     }
 }
 
 # --- Feature Engineering ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare raw features with proper encoding"""
-    # Convert all inputs to numerical values
+    """Prepare features with proper encoding"""
+    # Convert all inputs
     features = {
         "gender": 1 if gender == "Male" else 0,
         "age": float(age),
@@ -53,7 +57,7 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
         "heart_disease": 1 if heart_disease == "Yes" else 0,
         "glucose": float(glucose),
         "hba1c": float(hba1c),
-        "padding": 0.0  # For dimensional consistency
+        "padding": 0.0
     }
     
     # Create feature arrays for each model
@@ -63,7 +67,7 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
         "full": [features[k] for k in MODEL_CONFIG["full"]["features"]]
     }
 
-# --- Model Loading ---
+# --- Resource Loading ---
 @st.cache_resource
 def load_resources():
     """Load models and scalers with validation"""
@@ -84,6 +88,7 @@ def load_resources():
             resources[name] = {
                 "model": model,
                 "scaler": scaler,
+                "description": config["description"],
                 "features": config["features"]
             }
         return resources
@@ -151,21 +156,20 @@ def main():
                 scaled_features = resource["scaler"].transform(features)
                 
                 # Predict
-                risk_percentage = resource["model"].predict(scaled_features)[0][0] * 100
+                risk = resource["model"].predict(scaled_features)[0][0] * 100
                 results.append({
-                    "model": model_key,
-                    "risk": risk_percentage,
-                    "features": resource["features"]
+                    "model": resource["description"],
+                    "risk": f"{risk:.1f}%",
+                    "features": len(resource["features"])
                 })
             
             # Display results
             st.success("### Prediction Results")
-            
             for result in results:
                 st.metric(
-                    label=f"{result['model'].upper()} Model",
-                    value=f"{result['risk']:.1f}%",
-                    help=f"Features: {', '.join(result['features'])}"
+                    label=result["model"],
+                    value=result["risk"],
+                    help=f"Using {result['features']} features"
                 )
             
             # Interpretation guide
