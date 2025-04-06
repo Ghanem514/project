@@ -1,6 +1,6 @@
 import streamlit as st
 import numpy as np
-import joblib  # This was missing
+import joblib
 from tensorflow.keras.models import load_model
 from pathlib import Path
 
@@ -10,35 +10,33 @@ MODEL_CONFIG = {
     "basic": {
         "model_path": BASE_DIR / "model1.h5",
         "scaler_path": BASE_DIR / "scaler1.joblib",
-        "required_features": 7,
+        "required_features": 8,  # Updated to match your scaler
         "features": [
-            "gender", "age", "bmi", 
-            "smoking", "hypertension", 
-            "heart_disease", "padding"
+            "gender", "age", "bmi",
+            "smoking_never", "smoking_former", "smoking_current",
+            "hypertension", "heart_disease"
         ],
-        "description": "Basic health factors only"
+        "description": "Basic model (7 health factors + 1 padding)"
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
         "scaler_path": BASE_DIR / "scaler2.joblib",
-        "required_features": 8,
+        "required_features": 9,
         "features": [
             "gender", "age", "bmi",
-            "smoking", "hypertension",
-            "heart_disease", "glucose",
-            "padding"
+            "smoking_never", "smoking_former", "smoking_current",
+            "hypertension", "heart_disease", "glucose"
         ],
         "description": "Includes blood glucose"
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
         "scaler_path": BASE_DIR / "scaler3.joblib",
-        "required_features": 9,
+        "required_features": 10,
         "features": [
             "gender", "age", "bmi",
-            "smoking", "hypertension",
-            "heart_disease", "glucose",
-            "hba1c", "padding"
+            "smoking_never", "smoking_former", "smoking_current",
+            "hypertension", "heart_disease", "glucose", "hba1c"
         ],
         "description": "Includes glucose + HbA1c"
     }
@@ -46,43 +44,49 @@ MODEL_CONFIG = {
 
 # --- Feature Engineering ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare features with proper encoding"""
-    # Convert all inputs
-    features = {
-        "gender": 1 if gender == "Male" else 0,
-        "age": float(age),
-        "bmi": float(bmi),
-        "smoking": {"Never": 0, "Former": 1, "Current": 2}[smoking],
-        "hypertension": 1 if hypertension == "Yes" else 0,
-        "heart_disease": 1 if heart_disease == "Yes" else 0,
-        "glucose": float(glucose),
-        "hba1c": float(hba1c),
-        "padding": 0.0
-    }
+    """Prepare features with exact dimensions expected by each scaler"""
+    # Convert categorical features
+    base_features = [
+        1 if gender == "Male" else 0,  # gender
+        float(age),                   # age
+        float(bmi),                   # bmi
+        1 if smoking == "Never" else 0,   # smoking_never
+        1 if smoking == "Former" else 0,  # smoking_former
+        1 if smoking == "Current" else 0, # smoking_current
+        1 if hypertension == "Yes" else 0,  # hypertension
+        1 if heart_disease == "Yes" else 0   # heart_disease
+    ]
     
-    # Create feature arrays for each model
     return {
-        "basic": [features[k] for k in MODEL_CONFIG["basic"]["features"]],
-        "glucose": [features[k] for k in MODEL_CONFIG["glucose"]["features"]],
-        "full": [features[k] for k in MODEL_CONFIG["full"]["features"]]
+        "basic": base_features,  # 8 features
+        "glucose": base_features + [float(glucose)],  # 9 features
+        "full": base_features + [float(glucose), float(hba1c)]  # 10 features
     }
 
 # --- Resource Loading ---
 @st.cache_resource
 def load_resources():
-    """Load models and scalers with validation"""
+    """Load models and scalers with strict validation"""
     resources = {}
     try:
         for name, config in MODEL_CONFIG.items():
-            # Load model and scaler
+            # Load resources
             model = load_model(config["model_path"])
             scaler = joblib.load(config["scaler_path"])
             
             # Verify dimensions
             if scaler.n_features_in_ != config["required_features"]:
                 raise ValueError(
-                    f"{name}: Scaler expects {scaler.n_features_in_} features, "
-                    f"but config specifies {config['required_features']}"
+                    f"{name}: Scaler has {scaler.n_features_in_} features, "
+                    f"but needs {config['required_features']}\n"
+                    f"Features expected: {config['features']}"
+                )
+            
+            # Verify model input shape
+            if model.input_shape[1] != config["required_features"]:
+                raise ValueError(
+                    f"{name}: Model expects {model.input_shape[1]} features, "
+                    f"but needs {config['required_features']}"
                 )
             
             resources[name] = {
@@ -151,7 +155,7 @@ def main():
             for model_key in active_models:
                 resource = resources[model_key]
                 
-                # Scale features
+                # Convert to numpy array and scale
                 features = np.array([raw_features[model_key]], dtype=np.float32)
                 scaled_features = resource["scaler"].transform(features)
                 
@@ -160,7 +164,7 @@ def main():
                 results.append({
                     "model": resource["description"],
                     "risk": f"{risk:.1f}%",
-                    "features": len(resource["features"])
+                    "features": ", ".join(resource["features"])
                 })
             
             # Display results
@@ -169,7 +173,7 @@ def main():
                 st.metric(
                     label=result["model"],
                     value=result["risk"],
-                    help=f"Using {result['features']} features"
+                    help=f"Features: {result['features']}"
                 )
             
             # Interpretation guide
