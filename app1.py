@@ -114,7 +114,7 @@ def main():
 
     if submitted:
         try:
-            # Choose model
+            # Determine which model to use
             model_key = "basic"
             if hba1c > 0:
                 model_key = "full"
@@ -128,6 +128,10 @@ def main():
                 glucose, hba1c
             )[model_key]
 
+            # Ensure the correct shape (1, features)
+            features = np.array([features])
+
+            # Predict risk
             prediction = model.predict(np.array([features]))[0][0] * 100
             st.success(f"Predicted Risk: {prediction:.1f}%")
             st.info(f"Model: {model_key.upper()}, Features used: {MODEL_CONFIG[model_key]['features']}")
