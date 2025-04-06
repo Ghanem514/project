@@ -128,7 +128,7 @@ def main():
                 glucose, hba1c
             )[model_key]
 
-            prediction = model.predict([features])[0][0] * 100
+            prediction = model.predict(np.array([features]))[0][0] * 100
             st.success(f"Predicted Risk: {prediction:.1f}%")
             st.info(f"Model: {model_key.upper()}, Features used: {MODEL_CONFIG[model_key]['features']}")
         except Exception as e:
