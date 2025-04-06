@@ -1,6 +1,5 @@
 import streamlit as st
 import numpy as np
-import joblib
 from tensorflow.keras.models import load_model
 from pathlib import Path
 
@@ -9,21 +8,19 @@ BASE_DIR = Path(__file__).parent
 MODEL_CONFIG = {
     "basic": {
         "model_path": BASE_DIR / "model1.h5",
-        "scaler_path": BASE_DIR / "scaler1.joblib",
-        "required_features": 8,  # Updated to match your scaler
+        "required_features": 8,
         "features": [
-            "gender", "age", "bmi",
+            "gender_male", "age", "bmi",
             "smoking_never", "smoking_former", "smoking_current",
             "hypertension", "heart_disease"
         ],
-        "description": "Basic model (7 health factors + 1 padding)"
+        "description": "Basic model (no glucose/HbA1c)"
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
-        "scaler_path": BASE_DIR / "scaler2.joblib",
         "required_features": 9,
         "features": [
-            "gender", "age", "bmi",
+            "gender_male", "age", "bmi",
             "smoking_never", "smoking_former", "smoking_current",
             "hypertension", "heart_disease", "glucose"
         ],
@@ -31,10 +28,9 @@ MODEL_CONFIG = {
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
-        "scaler_path": BASE_DIR / "scaler3.joblib",
         "required_features": 10,
         "features": [
-            "gender", "age", "bmi",
+            "gender_male", "age", "bmi",
             "smoking_never", "smoking_former", "smoking_current",
             "hypertension", "heart_disease", "glucose", "hba1c"
         ],
@@ -42,12 +38,11 @@ MODEL_CONFIG = {
     }
 }
 
-# --- Feature Engineering ---
+# --- Feature Preparation ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare features with exact dimensions expected by each scaler"""
-    # Convert categorical features
+    """Prepare features for all models with proper encoding"""
     base_features = [
-        1 if gender == "Male" else 0,  # gender
+        1 if gender == "Male" else 0,  # gender_male
         float(age),                   # age
         float(bmi),                   # bmi
         1 if smoking == "Never" else 0,   # smoking_never
@@ -57,56 +52,39 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
         1 if heart_disease == "Yes" else 0   # heart_disease
     ]
     
-    return {
-        "basic": base_features,  # 8 features
-        "glucose": base_features + [float(glucose)],  # 9 features
-        "full": base_features + [float(glucose), float(hba1c)]  # 10 features
+    # Create features for all models
+    features = {
+        "basic": np.array([base_features], dtype=np.float32),
+        "glucose": np.array([base_features + [float(glucose)]], dtype=np.float32),
+        "full": np.array([base_features + [float(glucose), float(hba1c)]], dtype=np.float32)
     }
+    
+    return features
 
-# --- Resource Loading ---
+# --- Model Loading ---
 @st.cache_resource
-def load_resources():
-    """Load models and scalers with strict validation"""
-    resources = {}
-    try:
-        for name, config in MODEL_CONFIG.items():
-            # Load resources
+def load_models():
+    """Load all models with validation"""
+    models = {}
+    for name, config in MODEL_CONFIG.items():
+        try:
             model = load_model(config["model_path"])
-            scaler = joblib.load(config["scaler_path"])
-            
-            # Verify dimensions
-            if scaler.n_features_in_ != config["required_features"]:
-                raise ValueError(
-                    f"{name}: Scaler has {scaler.n_features_in_} features, "
-                    f"but needs {config['required_features']}\n"
-                    f"Features expected: {config['features']}"
-                )
-            
-            # Verify model input shape
             if model.input_shape[1] != config["required_features"]:
-                raise ValueError(
-                    f"{name}: Model expects {model.input_shape[1]} features, "
-                    f"but needs {config['required_features']}"
-                )
-            
-            resources[name] = {
-                "model": model,
-                "scaler": scaler,
-                "description": config["description"],
-                "features": config["features"]
-            }
-        return resources
-    except Exception as e:
-        st.error(f"❌ Initialization failed: {str(e)}")
-        st.stop()
+                st.error(f"Model {name} expects {model.input_shape[1]} features, but config specifies {config['required_features']}")
+                st.stop()
+            models[name] = model
+        except Exception as e:
+            st.error(f"Failed to load {name}: {str(e)}")
+            st.stop()
+    return models
 
-# --- Streamlit App ---
+# --- Streamlit UI ---
 def main():
-    st.set_page_config(page_title="Diabetes Prediction", layout="wide")
+    st.set_page_config(page_title="Diabetes Risk Prediction", layout="wide")
     st.title("🩺 Diabetes Risk Prediction")
     
-    # Load resources
-    resources = load_resources()
+    # Load models
+    models = load_models()
     
     # --- Input Form ---
     with st.form("input_form"):
@@ -123,7 +101,7 @@ def main():
             
         with col2:
             st.subheader("Health History")
-            smoking = st.selectbox("Smoking", ["Never", "Former", "Current"])
+            smoking = st.selectbox("Smoking Status", ["Never", "Former", "Current"])
             hypertension = st.selectbox("Hypertension", ["No", "Yes"])
             heart_disease = st.selectbox("Heart Disease", ["No", "Yes"])
             
@@ -136,6 +114,13 @@ def main():
     # --- Prediction ---
     if submitted:
         try:
+            # Prepare features
+            features = prepare_features(
+                gender, age, bmi, smoking,
+                hypertension, heart_disease,
+                glucose, hba1c
+            )
+            
             # Determine which models to use
             active_models = ["basic"]
             if glucose > 0:
@@ -143,46 +128,35 @@ def main():
             if hba1c > 0:
                 active_models.append("full")
             
-            # Prepare features
-            raw_features = prepare_features(
-                gender, age, bmi, smoking,
-                hypertension, heart_disease,
-                glucose, hba1c
-            )
-            
-            # Make predictions
-            results = []
-            for model_key in active_models:
-                resource = resources[model_key]
-                
-                # Convert to numpy array and scale
-                features = np.array([raw_features[model_key]], dtype=np.float32)
-                scaled_features = resource["scaler"].transform(features)
-                
-                # Predict
-                risk = resource["model"].predict(scaled_features)[0][0] * 100
-                results.append({
-                    "model": resource["description"],
-                    "risk": f"{risk:.1f}%",
-                    "features": ", ".join(resource["features"])
-                })
-            
             # Display results
             st.success("### Prediction Results")
-            for result in results:
+            
+            for model_key in active_models:
+                prediction = models[model_key].predict(features[model_key])[0][0] * 100
+                
+                # Debugging output
+                st.write(f"Model: {model_key}, Prediction: {prediction:.2f}")
+                
                 st.metric(
-                    label=result["model"],
-                    value=result["risk"],
-                    help=f"Features: {result['features']}"
+                    label=f"{MODEL_CONFIG[model_key]['description']}",
+                    value=f"{prediction:.1f}%",
+                    help=f"Features used: {', '.join(MODEL_CONFIG[model_key]['features'])}"
                 )
             
-            # Interpretation guide
+            # Risk interpretation guide
             st.info("""
             **Risk Interpretation:**
             - < 5%: Low risk
             - 5-20%: Moderate risk  
             - > 20%: High risk
             """)
+            
+        except Exception as e:
+            st.error(f"⚠️ Prediction failed: {str(e)}")
+
+if __name__ == "__main__":
+    main()
+
             
         except Exception as e:
             st.error(f"⚠️ Prediction failed: {str(e)}")
