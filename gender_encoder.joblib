@@ -1,0 +1,5 @@
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder
+from joblib import dump
+# Save OneHotEncoder (fitted on 'gender')
+encoder = OneHotEncoder().fit(X_train[['gender']])
+dump(encoder, 'gender_encoder.joblib')  # Saves as .joblib file
