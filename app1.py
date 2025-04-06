@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).parent
 MODEL_CONFIG = {
     "basic": {
         "model_path": BASE_DIR / "model1.h5",
+        "expected_features": 6,  # Updated to match model1.h5
         "features": [
             "gender_encoded", "age", "bmi", "smoking_encoded",
             "hypertension", "heart_disease"
@@ -15,6 +16,7 @@ MODEL_CONFIG = {
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
+        "expected_features": 7,  # Updated to match model2.h5
         "features": [
             "gender_encoded", "age", "bmi", "smoking_encoded",
             "hypertension", "heart_disease", "glucose"
@@ -22,6 +24,7 @@ MODEL_CONFIG = {
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
+        "expected_features": 8,  # Updated to match model3.h5
         "features": [
             "gender_encoded", "age", "bmi", "smoking_encoded",
             "hypertension", "heart_disease", "glucose", "hba1c"
@@ -29,60 +32,68 @@ MODEL_CONFIG = {
     }
 }
 
-# --- Manual Mean/Std (replace these with actual training data stats!) ---
-FEATURE_STATS = {
-    "age": (50, 15),
-    "bmi": (25, 5),
-    "smoking_encoded": (1, 0.8),
-    "hypertension": (0.2, 0.4),
-    "heart_disease": (0.1, 0.3),
-    "gender_encoded": (0.5, 0.5),
-    "glucose": (100, 30),
-    "hba1c": (5.5, 1.5)
-}
-
-def standardize(value, mean, std):
-    return (value - mean) / std if std != 0 else value
-
 # --- Feature Preparation ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    gender_encoded = 1 if gender == "Male" else 0
-    smoking_encoded = {"Never": 0, "Former": 1, "Current": 2}[smoking]
-    hypertension_encoded = 1 if hypertension == "Yes" else 0
-    heart_disease_encoded = 1 if heart_disease == "Yes" else 0
-
-    raw_features = {
-        "gender_encoded": gender_encoded,
+    """Prepare features with proper shape for each model"""
+    # Convert all inputs
+    features = {
+        "gender_encoded": 1 if gender == "Male" else 0,
         "age": float(age),
         "bmi": float(bmi),
-        "smoking_encoded": smoking_encoded,
-        "hypertension": hypertension_encoded,
-        "heart_disease": heart_disease_encoded,
+        "smoking_encoded": {"Never": 0, "Former": 1, "Current": 2}[smoking],
+        "hypertension": 1 if hypertension == "Yes" else 0,
+        "heart_disease": 1 if heart_disease == "Yes" else 0,
         "glucose": float(glucose),
         "hba1c": float(hba1c)
     }
-
-    # Create all 3 feature sets, standardized
-    features = {
-        "basic": [],
-        "glucose": [],
-        "full": []
+    
+    # Create feature arrays for each model
+    return {
+        "basic": np.array([
+            features["gender_encoded"],
+            features["age"],
+            features["bmi"],
+            features["smoking_encoded"],
+            features["hypertension"],
+            features["heart_disease"]
+        ]).reshape(1, -1),  # Shape (1, 6)
+        
+        "glucose": np.array([
+            features["gender_encoded"],
+            features["age"],
+            features["bmi"],
+            features["smoking_encoded"],
+            features["hypertension"],
+            features["heart_disease"],
+            features["glucose"]
+        ]).reshape(1, -1),  # Shape (1, 7)
+        
+        "full": np.array([
+            features["gender_encoded"],
+            features["age"],
+            features["bmi"],
+            features["smoking_encoded"],
+            features["hypertension"],
+            features["heart_disease"],
+            features["glucose"],
+            features["hba1c"]
+        ]).reshape(1, -1)  # Shape (1, 8)
     }
-    for key in MODEL_CONFIG["basic"]["features"]:
-        features["basic"].append(standardize(raw_features[key], *FEATURE_STATS[key]))
-    for key in MODEL_CONFIG["glucose"]["features"]:
-        features["glucose"].append(standardize(raw_features[key], *FEATURE_STATS[key]))
-    for key in MODEL_CONFIG["full"]["features"]:
-        features["full"].append(standardize(raw_features[key], *FEATURE_STATS[key]))
-
-    return features
 
 # --- Load Models ---
 @st.cache_resource
 def load_models():
+    """Load models with validation"""
     models = {}
     for name, config in MODEL_CONFIG.items():
-        models[name] = load_model(config["model_path"])
+        model = load_model(config["model_path"])
+        # Verify model input shape
+        if model.input_shape[1] != config["expected_features"]:
+            raise ValueError(
+                f"Model {name} expects {model.input_shape[1]} features, "
+                f"but config specifies {config['expected_features']}"
+            )
+        models[name] = model
     return models
 
 # --- Streamlit App ---
@@ -121,22 +132,26 @@ def main():
             elif glucose > 0:
                 model_key = "glucose"
 
-            model = models[model_key]
+            # Get prepared features
             features = prepare_features(
                 gender, age, bmi, smoking,
                 hypertension, heart_disease,
                 glucose, hba1c
             )[model_key]
 
-            # Ensure the correct shape (1, features)
-            features = np.array([features])
-
-            # Predict risk
+            # Predict
             prediction = model.predict(np.array([features]))[0][0] * 100
             st.success(f"Predicted Risk: {prediction:.1f}%")
             st.info(f"Model: {model_key.upper()}, Features used: {MODEL_CONFIG[model_key]['features']}")
+            
         except Exception as e:
             st.error(f"Error: {str(e)}")
+            st.write("Debug Info:")
+            st.json({
+                "model_key": model_key,
+                "features_shape": features.shape,
+                "expected_shape": models[model_key].input_shape
+            })
 
 if __name__ == "__main__":
     main()
