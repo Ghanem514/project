@@ -156,10 +156,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-            
-        except Exception as e:
-            st.error(f"⚠️ Prediction failed: {str(e)}")
-
-if __name__ == "__main__":
-    main()
