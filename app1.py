@@ -134,7 +134,7 @@ def main():
             st.success("### Prediction Results")
             
             for model_key in active_models:
-                prediction = models[model_key].predict(features[model_key])[0][0] * 100
+                prediction = model.predict(np.array([features]))[0][0] * 100
                 st.metric(
                     label=f"{MODEL_CONFIG[model_key]['description']}",
                     value=f"{prediction:.1f}%",
