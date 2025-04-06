@@ -37,7 +37,7 @@ MODEL_CONFIG = {
             "gender_male", "age", "bmi",
             "smoking_encoded", "hypertension",
             "heart_disease", "glucose",
-            "hba1c", "extra_placeholder"
+            "hba1c"
         ]
     }
 }
