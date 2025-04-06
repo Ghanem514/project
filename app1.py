@@ -10,33 +10,34 @@ MODEL_CONFIG = {
     "basic": {
         "model_path": BASE_DIR / "model1.h5",
         "scaler_path": BASE_DIR / "scaler1.joblib",
-        "required_features": 7,  # Must match scaler1.joblib
+        "required_features": 8,  # Updated to match your scaler
         "features": [
             "gender_male", "age", "bmi", 
             "smoking_encoded", "hypertension", 
-            "heart_disease", "padding1"
+            "heart_disease", "glucose_placeholder",
+            "hba1c_placeholder"
         ]
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
         "scaler_path": BASE_DIR / "scaler2.joblib",
-        "required_features": 9,  # Updated to match your scaler
+        "required_features": 9,  # Matches your scaler
         "features": [
             "gender_male", "age", "bmi",
             "smoking_encoded", "hypertension",
             "heart_disease", "glucose",
-            "padding1", "padding2"
+            "hba1c_placeholder", "extra_placeholder"
         ]
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
         "scaler_path": BASE_DIR / "scaler3.joblib",
-        "required_features": 9,  # Must match scaler3.joblib
+        "required_features": 9,  # Matches your scaler
         "features": [
             "gender_male", "age", "bmi",
             "smoking_encoded", "hypertension",
             "heart_disease", "glucose",
-            "hba1c", "padding1"
+            "hba1c", "extra_placeholder"
         ]
     }
 }
@@ -53,7 +54,7 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
     ]
     
     return {
-        "basic": base_features + [0.0],  # 7 total
+        "basic": base_features + [0.0, 0.0],  # 8 total (with placeholders)
         "glucose": base_features + [float(glucose), 0.0, 0.0],  # 9 total
         "full": base_features + [float(glucose), float(hba1c), 0.0]  # 9 total
     }
