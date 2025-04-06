@@ -11,66 +11,85 @@ MODELS = {
     "glucose": BASE_DIR / "model2.h5",    # 8 features
     "full": BASE_DIR / "model3.h5"        # 9 features
 }
+SCALERS = {
+    "basic": BASE_DIR / "scaler1.joblib",    # 7 features
+    "glucose": BASE_DIR / "scaler2.joblib",  # 8 features
+    "full": BASE_DIR / "scaler3.joblib"      # 9 features
+}
 
 # --- Feature Engineering ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare features EXACTLY as done during training"""
-    # 1. Gender (dummy encoded: Female=0, Male=1)
-    gender_male = 1 if gender == "Male" else 0
+    """Prepare features with proper encoding"""
+    # 1. Gender encoding (Male=1, Female=0)
+    gender_encoded = 1 if gender == "Male" else 0
     
-    # 2. Smoking (ordinal encoded)
+    # 2. Smoking history (Never=0, Former=1, Current=2)
     smoking_map = {"Never": 0, "Former": 1, "Current": 2}
     smoking_encoded = smoking_map[smoking]
     
-    # 3. Yes/No features (binary)
+    # 3. Yes/No features (Yes=1, No=0)
     hypertension_encoded = 1 if hypertension == "Yes" else 0
     heart_disease_encoded = 1 if heart_disease == "Yes" else 0
     
-    # Base features for Model 1 (7 features)
+    # Base features (7)
     features = [
-        gender_male,        # 1
-        float(age),         # 2
-        float(bmi),         # 3
-        smoking_encoded,    # 4
-        hypertension_encoded, # 5
-        heart_disease_encoded # 6
-        # (7th feature is added below)
+        gender_encoded,
+        float(age),
+        float(bmi),
+        smoking_encoded,
+        hypertension_encoded,
+        heart_disease_encoded
     ]
     
-    # Add glucose for Model 2 (8 features)
+    # Add glucose if provided (8)
     if glucose > 0:
-        features.append(float(glucose))  # 7
+        features.append(float(glucose))
         
-    # Add HbA1c for Model 3 (9 features)
+    # Add HbA1c if provided (9)
     if hba1c > 0:
-        features.append(float(hba1c))    # 8
+        features.append(float(hba1c))
         
-    # Pad with zeros if needed (matches training)
-    while len(features) < 9:
-        features.append(0.0)
-        
-    return np.array([features[:7], features[:8], features[:9]])  # Return all variants
+    return np.array([features])
 
-# --- Model Loading ---
+# --- Resource Loading ---
 @st.cache_resource
 def load_resources():
-    """Load models with validation"""
+    """Load all models and their matching scalers"""
     try:
-        models = {name: load_model(path) for name, path in MODELS.items()}
-        # Single scaler trained on MAX features (9)
-        scaler = joblib.load(BASE_DIR / "scaler.joblib") 
-        return scaler, models
+        resources = {}
+        for name in MODELS:
+            # Load model and its specific scaler
+            model = load_model(MODELS[name])
+            scaler = joblib.load(SCALERS[name])
+            
+            # Verify feature counts match
+            expected_features = {
+                "basic": 7,
+                "glucose": 8,
+                "full": 9
+            }[name]
+            
+            if scaler.n_features_in_ != expected_features:
+                raise ValueError(
+                    f"Model {name} expects {expected_features} features, "
+                    f"but scaler has {scaler.n_features_in_}"
+                )
+                
+            resources[name] = {"model": model, "scaler": scaler}
+            
+        return resources
+        
     except Exception as e:
-        st.error(f"❌ Failed to load: {str(e)}")
+        st.error(f"❌ Initialization failed: {str(e)}")
         st.stop()
 
-# --- Streamlit App ---
+# --- Streamlit UI ---
 def main():
     st.set_page_config(page_title="Diabetes Prediction", layout="wide")
     st.title("🩺 Diabetes Risk Prediction")
     
     # Load resources
-    scaler, models = load_resources()
+    resources = load_resources()
     
     # --- Input Form ---
     with st.form("input_form"):
@@ -78,7 +97,7 @@ def main():
         
         with col1:
             st.subheader("Basic Information")
-            gender = st.selectbox("Gender", ["Female", "Male"])  # Female first!
+            gender = st.selectbox("Gender", ["Male", "Female"])
             age = st.number_input("Age", 1, 120, 30)
             weight = st.number_input("Weight (kg)", 30.0, 200.0, 70.0)
             height = st.number_input("Height (cm)", 100.0, 250.0, 170.0)
@@ -87,7 +106,7 @@ def main():
             
         with col2:
             st.subheader("Health History")
-            smoking = st.selectbox("Smoking", ["Never", "Former", "Current"])
+            smoking = st.selectbox("Smoking History", ["Never", "Former", "Current"])
             hypertension = st.selectbox("Hypertension", ["No", "Yes"])
             heart_disease = st.selectbox("Heart Disease", ["No", "Yes"])
             
@@ -100,41 +119,52 @@ def main():
     # --- Prediction ---
     if submitted:
         try:
-            # Prepare ALL feature variants
-            basic_feat, glucose_feat, full_feat = prepare_features(
+            # Determine which model to use
+            model_key = "basic"
+            if hba1c > 0:
+                model_key = "full"
+            elif glucose > 0:
+                model_key = "glucose"
+            
+            # Get the correct resources
+            model = resources[model_key]["model"]
+            scaler = resources[model_key]["scaler"]
+            
+            # Prepare features
+            input_array = prepare_features(
                 gender, age, bmi, smoking,
                 hypertension, heart_disease,
                 glucose, hba1c
             )
             
-            # Select correct features
-            if hba1c > 0:
-                features = full_feat
-                model = models["full"]
-            elif glucose > 0:
-                features = glucose_feat
-                model = models["glucose"]
-            else:
-                features = basic_feat
-                model = models["basic"]
+            # Validate feature count
+            if input_array.shape[1] != scaler.n_features_in_:
+                raise ValueError(
+                    f"Expected {scaler.n_features_in_} features, got {input_array.shape[1]}"
+                )
             
             # Scale and predict
-            scaled_input = scaler.transform(features.reshape(1, -1))
+            scaled_input = scaler.transform(input_array)
             risk = model.predict(scaled_input)[0][0] * 100
             
             # Display results
             st.success(f"Predicted Risk: {risk:.1f}%")
             st.info(f"""
-            **Model Used**: {"Full" if hba1c > 0 else "Glucose" if glucose > 0 else "Basic"}
-            **Features**: {features.shape[1]} 
+            **Model Used**: {model_key.upper()} ({scaler.n_features_in_} features)
+            **Risk Interpretation**:
+            - < 5%: Low risk
+            - 5-20%: Moderate risk  
+            - > 20%: High risk
             """)
             
         except Exception as e:
-            st.error(f"Prediction failed: {str(e)}")
-            st.write("Debug Info:")
+            st.error(f"⚠️ Prediction failed: {str(e)}")
             st.json({
-                "input_features": features.tolist(),
-                "scaler_features": scaler.n_features_in_
+                "error_details": {
+                    "expected_features": resources[model_key]["scaler"].n_features_in_,
+                    "received_features": input_array.shape[1],
+                    "input_values": input_array.tolist()[0]
+                }
             })
 
 if __name__ == "__main__":
