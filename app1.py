@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 from tensorflow.keras.models import load_model
-from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 
 # --- Constants ---
@@ -53,14 +52,11 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
         1 if heart_disease == "Yes" else 0   # heart_disease
     ]
     
-    # Create features for all models
-    features = {
+    return {
         "basic": np.array([base_features], dtype=np.float32),
         "glucose": np.array([base_features + [float(glucose)]], dtype=np.float32),
         "full": np.array([base_features + [float(glucose), float(hba1c)]], dtype=np.float32)
     }
-    
-    return features
 
 # --- Model Loading ---
 @st.cache_resource
@@ -104,7 +100,7 @@ def main():
             st.subheader("Health History")
             smoking = st.selectbox("Smoking Status", ["Never", "Former", "Current"])
             hypertension = st.selectbox("Hypertension", ["No", "Yes"])
-            heart_disease = st.selectbox("Heart Disease", ["No", "Yes"])
+            heart_disease = st.selectbox("Heart Disease", ["No", "Yes"] )
             
             st.subheader("Advanced Metrics")
             glucose = st.number_input("Glucose (mg/dL)", 0.0, 500.0, 0.0)
@@ -122,6 +118,11 @@ def main():
                 glucose, hba1c
             )
             
+            # Log the features to check the values passed to the model
+            st.write("Prepared features for the model:")
+            st.write(features)
+            st.write(f"Shape of the input array: {features['basic'].shape}")
+            
             # Determine which models to use
             active_models = ["basic"]
             if glucose > 0:
@@ -134,11 +135,6 @@ def main():
             
             for model_key in active_models:
                 prediction = models[model_key].predict(features[model_key])[0][0] * 100
-                
-                # Debugging output
-                st.write(f"Model: {model_key}, Prediction (raw output): {models[model_key].predict(features[model_key])[0][0]}")
-                st.write(f"Prediction (scaled): {prediction:.2f}")
-                
                 st.metric(
                     label=f"{MODEL_CONFIG[model_key]['description']}",
                     value=f"{prediction:.1f}%",
@@ -158,3 +154,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
