@@ -10,24 +10,31 @@ MODEL_CONFIG = {
     "basic": {
         "model_path": BASE_DIR / "model1.h5",
         "scaler_path": BASE_DIR / "scaler1.joblib",
+        "required_features": 8,  # Updated to match your scaler
         "features": [
+            "gender_male",  # Keep dummy variables in scaling
             "age", "bmi", "smoking_encoded",
-            "hypertension", "heart_disease"
+            "hypertension", "heart_disease",
+            "glucose_placeholder", "hba1c_placeholder"  # Padding
         ]
     },
     "glucose": {
         "model_path": BASE_DIR / "model2.h5",
         "scaler_path": BASE_DIR / "scaler2.joblib",
+        "required_features": 8,  # Updated to match your scaler
         "features": [
+            "gender_male",
             "age", "bmi", "smoking_encoded",
             "hypertension", "heart_disease",
-            "glucose"
+            "glucose", "hba1c_placeholder"  # Padding
         ]
     },
     "full": {
         "model_path": BASE_DIR / "model3.h5",
         "scaler_path": BASE_DIR / "scaler3.joblib",
+        "required_features": 8,  # Updated to match your scaler
         "features": [
+            "gender_male",
             "age", "bmi", "smoking_encoded",
             "hypertension", "heart_disease",
             "glucose", "hba1c"
@@ -35,27 +42,31 @@ MODEL_CONFIG = {
     }
 }
 
-# --- Feature Preparation ---
+# --- Feature Engineering ---
 def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glucose=0, hba1c=0):
-    """Prepare features without dummy variables for scaling"""
-    # Convert categorical features
-    smoking_encoded = {"Never": 0, "Former": 1, "Current": 2}[smoking]
-    
-    # Features that should be scaled (excluding dummy variables)
+    """Prepare all features to match scaler expectations"""
+    # Convert all inputs
     features = {
         "basic": [
-            float(age), float(bmi), smoking_encoded,
-            1 if hypertension == "Yes" else 0,
-            1 if heart_disease == "Yes" else 0
-        ],
-        "glucose": [
-            float(age), float(bmi), smoking_encoded,
+            1 if gender == "Male" else 0,  # gender_male
+            float(age), float(bmi),
+            {"Never": 0, "Former": 1, "Current": 2}[smoking],
             1 if hypertension == "Yes" else 0,
             1 if heart_disease == "Yes" else 0,
-            float(glucose)
+            0.0, 0.0  # Placeholders
+        ],
+        "glucose": [
+            1 if gender == "Male" else 0,
+            float(age), float(bmi),
+            {"Never": 0, "Former": 1, "Current": 2}[smoking],
+            1 if hypertension == "Yes" else 0,
+            1 if heart_disease == "Yes" else 0,
+            float(glucose), 0.0  # Placeholder
         ],
         "full": [
-            float(age), float(bmi), smoking_encoded,
+            1 if gender == "Male" else 0,
+            float(age), float(bmi),
+            {"Never": 0, "Former": 1, "Current": 2}[smoking],
             1 if hypertension == "Yes" else 0,
             1 if heart_disease == "Yes" else 0,
             float(glucose), float(hba1c)
@@ -63,22 +74,22 @@ def prepare_features(gender, age, bmi, smoking, hypertension, heart_disease, glu
     }
     return features
 
-# --- Model Loading ---
+# --- Resource Loading ---
 @st.cache_resource
 def load_resources():
-    """Load models and scalers with validation"""
+    """Load with exact feature validation"""
     resources = {}
     try:
         for name, config in MODEL_CONFIG.items():
-            # Load resources
             model = load_model(config["model_path"])
             scaler = joblib.load(config["scaler_path"])
             
-            # Verify feature counts
-            if scaler.n_features_in_ != len(config["features"]):
+            # Critical validation
+            if scaler.n_features_in_ != config["required_features"]:
                 raise ValueError(
-                    f"{name}: Scaler expects {scaler.n_features_in_} features, "
-                    f"but config specifies {len(config['features'])}"
+                    f"{name}: Scaler has {scaler.n_features_in_} features, "
+                    f"config expects {config['required_features']}\n"
+                    f"Features: {config['features']}"
                 )
             
             resources[name] = {
@@ -127,14 +138,14 @@ def main():
     # --- Prediction ---
     if submitted:
         try:
-            # Determine model to use
+            # Model selection
             model_key = "basic"
             if hba1c > 0:
                 model_key = "full"
             elif glucose > 0:
                 model_key = "glucose"
             
-            # Get resources and features
+            # Get prepared features
             resource = resources[model_key]
             features = prepare_features(
                 gender, age, bmi, smoking,
@@ -142,17 +153,9 @@ def main():
                 glucose, hba1c
             )[model_key]
             
-            # Add gender dummy variable AFTER scaling
-            gender_encoded = 1 if gender == "Male" else 0
-            
-            # Scale continuous features
-            scaled_features = resource["scaler"].transform([features])
-            
-            # Combine with dummy variables
-            final_features = np.insert(scaled_features, 0, gender_encoded)
-            
-            # Predict
-            risk = resource["model"].predict([final_features])[0][0] * 100
+            # Scale and predict
+            scaled_input = resource["scaler"].transform([features])
+            risk = resource["model"].predict(scaled_input)[0][0] * 100
             
             # Display results
             st.success(f"Predicted Risk: {risk:.1f}%")
