@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 from tensorflow.keras.models import load_model
+from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 
 # --- Constants ---
@@ -135,7 +136,8 @@ def main():
                 prediction = models[model_key].predict(features[model_key])[0][0] * 100
                 
                 # Debugging output
-                st.write(f"Model: {model_key}, Prediction: {prediction:.2f}")
+                st.write(f"Model: {model_key}, Prediction (raw output): {models[model_key].predict(features[model_key])[0][0]}")
+                st.write(f"Prediction (scaled): {prediction:.2f}")
                 
                 st.metric(
                     label=f"{MODEL_CONFIG[model_key]['description']}",
